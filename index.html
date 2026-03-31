@@ -1,0 +1,636 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DTDC Pickup Manifest Generator</title>
+    
+    <!-- Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Font Awesome for icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- jsPDF and AutoTable for PDF Generation -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; background-color: #f3f4f6; }
+        .table-container { max-height: 100%; }
+        
+        /* Custom Scrollbar for table */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        
+        /* Shake animation for errors */
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            10%, 30%, 50%, 70%, 90% { transform: translateX(-5px); }
+            20%, 40%, 60%, 80% { transform: translateX(5px); }
+        }
+        .shake { animation: shake 0.4s; }
+    </style>
+</head>
+<body class="text-slate-800 h-screen flex flex-col overflow-hidden">
+
+    <!-- Top Header Navigation -->
+    <header class="bg-red-700 text-white shadow-md z-10">
+        <div class="container mx-auto px-4 py-3 flex flex-wrap justify-between items-center">
+            <div class="flex items-center space-x-3">
+                <i class="fa-solid fa-boxes-packing text-2xl"></i>
+                <h1 class="text-xl md:text-2xl font-bold tracking-wide">Pickup Manifest Generator</h1>
+            </div>
+            <div class="text-right text-sm md:text-base mt-2 md:mt-0 bg-red-800 px-4 py-1 rounded-lg border border-red-600">
+                <div class="font-semibold text-red-100" id="liveClock">Loading time...</div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content Area -->
+    <main class="flex-1 container mx-auto px-4 py-6 flex flex-col lg:flex-row gap-6 overflow-hidden">
+        
+        <!-- Left Panel: Controls & Inputs -->
+        <div class="w-full lg:w-1/3 flex flex-col gap-5 overflow-y-auto pr-1 pb-4">
+            
+            <!-- Info Card -->
+            <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
+                <div class="grid grid-cols-2 gap-4 text-sm">
+                    <div>
+                        <p class="text-slate-500 font-medium text-xs uppercase tracking-wider">Shipper</p>
+                        <p class="font-bold text-slate-800 text-lg">Foot Steps</p>
+                    </div>
+                    <div>
+                        <p class="text-slate-500 font-medium text-xs uppercase tracking-wider">Courier</p>
+                        <p class="font-bold text-red-700 text-lg">DTDC Surface</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Stats Card -->
+            <div class="bg-slate-800 text-white p-5 rounded-xl shadow-sm text-center relative overflow-hidden">
+                <div class="absolute top-0 right-0 opacity-10 text-6xl -mr-4 -mt-4">
+                    <i class="fa-solid fa-barcode"></i>
+                </div>
+                <p class="text-slate-400 font-medium text-xs uppercase tracking-widest mb-1">Total Shipments Scanned</p>
+                <div class="text-5xl font-black text-emerald-400" id="totalCount">0</div>
+            </div>
+
+            <!-- Scanning Area -->
+            <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-200">
+                <label for="awbInput" class="block text-slate-700 font-bold mb-2">Scan or Enter AWB Number</label>
+                <div class="relative">
+                    <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                        <i class="fa-solid fa-barcode text-slate-400 text-xl"></i>
+                    </div>
+                    <input type="text" id="awbInput" autocomplete="off" 
+                           class="w-full pl-10 pr-4 py-4 text-2xl font-bold uppercase bg-slate-50 border-2 border-slate-300 rounded-lg focus:outline-none focus:border-red-600 focus:ring-2 focus:ring-red-200 transition-colors shadow-inner placeholder-slate-300" 
+                           placeholder="SCAN AWB HERE">
+                </div>
+                
+                <!-- Error Toast Notification -->
+                <div id="errorArea" class="hidden mt-3 bg-red-100 border-l-4 border-red-600 text-red-800 p-3 rounded-r-lg items-center shadow-sm">
+                    <i class="fa-solid fa-triangle-exclamation text-xl mr-2"></i>
+                    <span id="errorText" class="font-bold text-sm">Duplicate AWB scanned!</span>
+                </div>
+            </div>
+
+            <!-- Manifest Export Controls -->
+            <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-200 mt-auto">
+                <h3 class="text-slate-700 font-bold mb-3 border-b pb-2">Export & Save</h3>
+                
+                <div class="mb-4">
+                    <label for="feName" class="block text-slate-600 font-medium text-sm mb-1">Field Executive (FE) Name</label>
+                    <div class="relative">
+                        <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                            <i class="fa-solid fa-user text-slate-400"></i>
+                        </div>
+                        <input type="text" id="feName" class="w-full pl-9 pr-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:border-red-500 focus:ring-1 focus:ring-red-500" placeholder="Enter name before downloading">
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-3 mb-3">
+                    <button id="btnPdf" class="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-3 rounded-lg shadow transition-colors flex items-center justify-center gap-2 text-sm">
+                        <i class="fa-solid fa-file-pdf"></i> PDF
+                    </button>
+                    <button id="btnCsv" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2 px-3 rounded-lg shadow transition-colors flex items-center justify-center gap-2 text-sm">
+                        <i class="fa-solid fa-file-csv"></i> CSV
+                    </button>
+                </div>
+                
+                <button id="btnCloseSheet" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 px-4 rounded-lg shadow transition-colors flex items-center justify-center gap-2 mb-3 text-sm">
+                    <i class="fa-solid fa-folder-closed"></i> Close Sheet & Save Data
+                </button>
+
+                <div class="grid grid-cols-2 gap-3">
+                    <button id="btnClear" class="bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-300 font-bold py-2 px-2 rounded-lg transition-colors flex items-center justify-center gap-2 text-xs">
+                        <i class="fa-solid fa-trash-can"></i> Discard List
+                    </button>
+                    <button id="btnDownloadHistory" class="bg-slate-700 hover:bg-slate-800 text-white border border-slate-800 font-bold py-2 px-2 rounded-lg transition-colors flex items-center justify-center gap-2 text-xs">
+                        <i class="fa-solid fa-download"></i> All History
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Panel: Live Table & Error Logs -->
+        <div class="w-full lg:w-2/3 flex flex-col gap-4 overflow-hidden">
+            
+            <!-- Live Scanned List -->
+            <div class="flex-1 bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col overflow-hidden">
+                <div class="p-3 border-b border-slate-200 bg-slate-50 flex justify-between items-center z-0">
+                    <h2 class="text-md font-bold text-slate-800"><i class="fa-solid fa-list-check mr-2 text-emerald-600"></i> Valid Scans</h2>
+                    <span class="text-xs font-semibold bg-emerald-100 text-emerald-700 py-1 px-3 rounded-full">Current Manifest</span>
+                </div>
+                
+                <div class="flex-1 overflow-auto table-container p-0">
+                    <table class="w-full text-left border-collapse">
+                        <thead class="sticky top-0 bg-slate-100 shadow-sm z-10">
+                            <tr>
+                                <th class="py-2 px-4 text-slate-600 font-bold text-xs uppercase border-b border-slate-200 w-16 text-center">Sr.</th>
+                                <th class="py-2 px-4 text-slate-600 font-bold text-xs uppercase border-b border-slate-200">AWB Code</th>
+                                <th class="py-2 px-4 text-slate-600 font-bold text-xs uppercase border-b border-slate-200 text-right">Time Stamp</th>
+                                <th class="py-2 px-4 text-slate-600 font-bold text-xs uppercase border-b border-slate-200 text-center w-20">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="scanTableBody" class="divide-y divide-slate-100">
+                            <!-- Empty State injected via JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Error List / Duplicate Logs -->
+            <div class="h-64 bg-white rounded-xl shadow-sm border border-red-200 flex flex-col overflow-hidden">
+                <div class="p-3 border-b border-red-200 bg-red-50 flex justify-between items-center z-0">
+                    <h2 class="text-md font-bold text-red-800"><i class="fa-solid fa-triangle-exclamation mr-2 text-red-600"></i> Invalid / Duplicate Scans</h2>
+                    <span id="errorCountBadge" class="text-xs font-semibold bg-red-200 text-red-800 py-1 px-3 rounded-full">0 Errors</span>
+                </div>
+                
+                <div class="flex-1 overflow-auto table-container p-0">
+                    <table class="w-full text-left border-collapse">
+                        <thead class="sticky top-0 bg-red-100 shadow-sm z-10">
+                            <tr>
+                                <th class="py-2 px-4 text-red-800 font-bold text-xs uppercase border-b border-red-200">AWB Code</th>
+                                <th class="py-2 px-4 text-red-800 font-bold text-xs uppercase border-b border-red-200">Reason</th>
+                                <th class="py-2 px-4 text-red-800 font-bold text-xs uppercase border-b border-red-200 text-right">Last Scanned Time</th>
+                            </tr>
+                        </thead>
+                        <tbody id="errorTableBody" class="divide-y divide-red-50">
+                            <!-- Empty Error State injected via JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+        </div>
+        
+    </main>
+
+    <script>
+        // --- State Variables ---
+        // Array of objects: { awb: string, timestamp: string }
+        let scannedAWBs = []; 
+        let allTimeAWBs = []; 
+        let errorLogs = []; // Array of objects: { awb: string, reason: string, prevTime: string }
+
+        const SHIPPER_NAME = "Foot Steps";
+        const COURIER_NAME = "DTDC Surface";
+
+        // --- DOM Elements ---
+        const awbInput = document.getElementById('awbInput');
+        const feNameInput = document.getElementById('feName');
+        
+        const scanTableBody = document.getElementById('scanTableBody');
+        const errorTableBody = document.getElementById('errorTableBody');
+        
+        const totalCountDisplay = document.getElementById('totalCount');
+        const errorCountBadge = document.getElementById('errorCountBadge');
+        
+        const errorArea = document.getElementById('errorArea');
+        const errorText = document.getElementById('errorText');
+        const liveClock = document.getElementById('liveClock');
+
+        // Buttons
+        const btnPdf = document.getElementById('btnPdf');
+        const btnCsv = document.getElementById('btnCsv');
+        const btnCloseSheet = document.getElementById('btnCloseSheet');
+        const btnClear = document.getElementById('btnClear');
+        const btnDownloadHistory = document.getElementById('btnDownloadHistory');
+
+        // --- Initialization ---
+        window.onload = () => {
+            // Load saved historical data (migrate old string arrays to object arrays if needed)
+            const savedAllTime = localStorage.getItem('dtdc_all_time_awbs');
+            if (savedAllTime) {
+                const parsed = JSON.parse(savedAllTime);
+                allTimeAWBs = parsed.map(item => {
+                    // Migration: if it's an old string record, convert to object
+                    if (typeof item === 'string') {
+                        return { awb: item, timestamp: 'Unknown (Old Record)' };
+                    }
+                    return item;
+                });
+            }
+
+            // Load saved current data from localStorage
+            const savedAWBs = localStorage.getItem('dtdc_scannedAWBs');
+            if (savedAWBs) {
+                scannedAWBs = JSON.parse(savedAWBs);
+            }
+
+            // Load saved error logs for the current session
+            const savedErrors = localStorage.getItem('dtdc_errorLogs');
+            if (savedErrors) {
+                errorLogs = JSON.parse(savedErrors);
+            }
+
+            const savedFeName = localStorage.getItem('dtdc_feName');
+            if (savedFeName) {
+                feNameInput.value = savedFeName;
+            }
+
+            updateUI();
+            updateErrorUI();
+
+            awbInput.focus();
+            updateClock();
+            setInterval(updateClock, 1000);
+        };
+
+        // Live Clock
+        function updateClock() {
+            const now = new Date();
+            const options = { 
+                weekday: 'short', year: 'numeric', month: 'short', day: 'numeric', 
+                hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true 
+            };
+            liveClock.textContent = now.toLocaleString('en-IN', options);
+        }
+
+        // --- Buzzer Sound Generator ---
+        function playErrorBuzzer() {
+            try {
+                const AudioContext = window.AudioContext || window.webkitAudioContext;
+                if (!AudioContext) return;
+                const ctx = new AudioContext();
+                const osc = ctx.createOscillator();
+                const gainNode = ctx.createGain();
+                
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(150, ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(80, ctx.currentTime + 0.3);
+                
+                gainNode.gain.setValueAtTime(0.5, ctx.currentTime);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3);
+                
+                osc.connect(gainNode);
+                gainNode.connect(ctx.destination);
+                
+                osc.start();
+                osc.stop(ctx.currentTime + 0.3);
+            } catch (e) {
+                console.log("Audio playback failed", e);
+            }
+        }
+
+        // --- Save FE Name automatically ---
+        feNameInput.addEventListener('input', (e) => {
+            localStorage.setItem('dtdc_feName', e.target.value);
+        });
+
+        // --- Scan Logic ---
+        awbInput.addEventListener('keydown', function(event) {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                processScan(this.value);
+            }
+        });
+
+        function processScan(value) {
+            const awb = value.trim().toUpperCase();
+            if (!awb) return;
+
+            // Check if it exists in the CURRENT list
+            const currentMatch = scannedAWBs.find(item => item.awb === awb);
+            
+            // Check if it exists in ALL-TIME history
+            const historyMatch = allTimeAWBs.find(item => item.awb === awb);
+            
+            if (currentMatch) {
+                logError(awb, "Double Scan (Current List)", currentMatch.timestamp);
+                playErrorBuzzer();
+            } else if (historyMatch) {
+                logError(awb, "Already Dispatched (History)", historyMatch.timestamp);
+                playErrorBuzzer();
+            } else {
+                // Valid Scan
+                hideError();
+                
+                const timestamp = new Date().toLocaleString('en-IN', {
+                    day: '2-digit', month: '2-digit', year: 'numeric',
+                    hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true
+                });
+                
+                scannedAWBs.unshift({ awb, timestamp }); // Add to top
+                localStorage.setItem('dtdc_scannedAWBs', JSON.stringify(scannedAWBs));
+                
+                updateUI();
+            }
+
+            awbInput.value = '';
+            awbInput.focus();
+        }
+
+        // --- Error Logging ---
+        function logError(awb, reason, prevTime) {
+            errorLogs.unshift({ awb, reason, prevTime });
+            localStorage.setItem('dtdc_errorLogs', JSON.stringify(errorLogs));
+            updateErrorUI();
+            
+            showError(`Error: ${awb} - ${reason}`);
+        }
+
+        function showError(message) {
+            errorText.textContent = message;
+            errorArea.classList.remove('hidden');
+            errorArea.classList.add('flex', 'shake');
+            
+            setTimeout(() => { errorArea.classList.remove('shake'); }, 500);
+            clearTimeout(window.errorTimeout);
+            window.errorTimeout = setTimeout(hideError, 4000);
+        }
+
+        function hideError() {
+            errorArea.classList.add('hidden');
+            errorArea.classList.remove('flex');
+        }
+
+        // --- Deleting an AWB manually (Event Delegation) ---
+        scanTableBody.addEventListener('click', (e) => {
+            const removeBtn = e.target.closest('.remove-btn');
+            if (removeBtn) {
+                const awb = removeBtn.getAttribute('data-awb');
+                if(confirm(`Are you sure you want to remove AWB: ${awb} from the current list?`)) {
+                    scannedAWBs = scannedAWBs.filter(item => item.awb !== awb);
+                    localStorage.setItem('dtdc_scannedAWBs', JSON.stringify(scannedAWBs));
+                    updateUI();
+                }
+                awbInput.focus();
+            }
+        });
+
+        // --- UI Updates ---
+        function updateUI() {
+            totalCountDisplay.textContent = scannedAWBs.length;
+            
+            if (scannedAWBs.length === 0) {
+                scanTableBody.innerHTML = `
+                    <tr>
+                        <td colspan="4" class="py-8 text-center text-slate-400">
+                            <i class="fa-solid fa-box-open text-4xl mb-2 text-slate-200"></i>
+                            <p class="text-md font-medium">No shipments scanned yet.</p>
+                        </td>
+                    </tr>`;
+                return;
+            }
+
+            scanTableBody.innerHTML = '';
+            
+            scannedAWBs.forEach((item, index) => {
+                const tr = document.createElement('tr');
+                tr.className = "hover:bg-emerald-50 transition-colors group";
+                const srNo = scannedAWBs.length - index;
+
+                tr.innerHTML = `
+                    <td class="py-2 px-4 border-b border-slate-100 text-center font-medium text-slate-500">${srNo}</td>
+                    <td class="py-2 px-4 border-b border-slate-100 font-bold text-slate-800 text-md tracking-wider">${item.awb}</td>
+                    <td class="py-2 px-4 border-b border-slate-100 text-right text-slate-500 text-sm whitespace-nowrap">${item.timestamp}</td>
+                    <td class="py-2 px-4 border-b border-slate-100 text-center">
+                        <button data-awb="${item.awb}" class="remove-btn text-slate-300 hover:text-red-500 transition-colors" title="Remove AWB">
+                            <i class="fa-solid fa-trash pointer-events-none"></i>
+                        </button>
+                    </td>
+                `;
+                scanTableBody.appendChild(tr);
+            });
+        }
+
+        function updateErrorUI() {
+            errorCountBadge.textContent = `${errorLogs.length} Errors`;
+
+            if (errorLogs.length === 0) {
+                errorTableBody.innerHTML = `
+                    <tr>
+                        <td colspan="3" class="py-6 text-center text-red-300">
+                            <i class="fa-solid fa-check-circle text-2xl mb-1 text-red-200"></i>
+                            <p class="text-sm">No scanning errors so far.</p>
+                        </td>
+                    </tr>`;
+                return;
+            }
+
+            errorTableBody.innerHTML = '';
+
+            errorLogs.forEach(log => {
+                const tr = document.createElement('tr');
+                tr.className = "hover:bg-red-100 transition-colors";
+                tr.innerHTML = `
+                    <td class="py-2 px-4 border-b border-red-100 font-bold text-red-800 text-md">${log.awb}</td>
+                    <td class="py-2 px-4 border-b border-red-100 text-red-600 font-medium text-sm">${log.reason}</td>
+                    <td class="py-2 px-4 border-b border-red-100 text-right text-red-500 text-sm whitespace-nowrap">
+                        <span class="block text-xs text-red-400">Previously scanned:</span>
+                        ${log.prevTime}
+                    </td>
+                `;
+                errorTableBody.appendChild(tr);
+            });
+        }
+
+        // --- Export & Reset Controls ---
+        
+        btnCloseSheet.addEventListener('click', () => {
+            if (scannedAWBs.length === 0) {
+                alert("No shipments to save. Scan some AWBs first.");
+                awbInput.focus();
+                return;
+            }
+            if(confirm("Close this sheet? This will permanently save these AWBs to history and clear the current screen.")) {
+                
+                // Add current AWBs to historical list (storing full object)
+                allTimeAWBs = [...scannedAWBs, ...allTimeAWBs]; // Newest history at top
+                localStorage.setItem('dtdc_all_time_awbs', JSON.stringify(allTimeAWBs));
+
+                // Clear current active sheet and error logs
+                scannedAWBs = [];
+                errorLogs = [];
+                localStorage.removeItem('dtdc_scannedAWBs');
+                localStorage.removeItem('dtdc_errorLogs');
+                
+                hideError();
+                updateUI();
+                updateErrorUI();
+                alert("Sheet closed and AWBs saved to history successfully!");
+            }
+            awbInput.focus();
+        });
+
+        btnClear.addEventListener('click', () => {
+            if (scannedAWBs.length > 0 || errorLogs.length > 0) {
+                if(confirm("DISCARD current list? This clears the screen and does NOT save to history.")) {
+                    scannedAWBs = [];
+                    errorLogs = [];
+                    localStorage.removeItem('dtdc_scannedAWBs');
+                    localStorage.removeItem('dtdc_errorLogs');
+                    hideError();
+                    updateUI();
+                    updateErrorUI();
+                }
+            }
+            awbInput.focus();
+        });
+
+        btnDownloadHistory.addEventListener('click', () => {
+            if (allTimeAWBs.length === 0) {
+                alert("History is empty. Close a sheet first to save data to history.");
+                awbInput.focus();
+                return;
+            }
+
+            let csvContent = "AWB Code,Saved Time Stamp\n";
+            allTimeAWBs.forEach(item => {
+                csvContent += `"${item.awb}","${item.timestamp}"\n`;
+            });
+
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            
+            const fileDate = new Date().toISOString().slice(0, 10);
+            link.setAttribute("href", url);
+            link.setAttribute("download", `DTDC_All_History_${fileDate}.csv`);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            awbInput.focus();
+        });
+
+        // Generate PDF
+        btnPdf.addEventListener('click', () => {
+            if (scannedAWBs.length === 0) {
+                alert("No valid shipments scanned. Cannot generate manifest.");
+                awbInput.focus();
+                return;
+            }
+
+            const feName = feNameInput.value.trim() || '____________________';
+            const total = scannedAWBs.length;
+            const currentDateTime = new Date().toLocaleString('en-IN', {
+                    day: '2-digit', month: '2-digit', year: 'numeric',
+                    hour: '2-digit', minute: '2-digit', hour12: true
+            });
+
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF();
+
+            const tableData = [...scannedAWBs].reverse().map((scan, index) => [
+                (index + 1).toString(), scan.awb, scan.timestamp
+            ]);
+
+            doc.autoTable({
+                startY: 50,
+                head: [['Sr. No.', 'AWB Code', 'Time Stamp']],
+                body: tableData,
+                theme: 'grid',
+                headStyles: { fillColor: [185, 28, 28], textColor: [255, 255, 255], fontStyle: 'bold', halign: 'center' },
+                columnStyles: {
+                    0: { halign: 'center', cellWidth: 30 },
+                    1: { halign: 'center', fontStyle: 'bold' },
+                    2: { halign: 'center' }
+                },
+                styles: { fontSize: 11, cellPadding: 4 },
+                didDrawPage: function (data) {
+                    const pageWidth = doc.internal.pageSize.width;
+                    const pageHeight = doc.internal.pageSize.height;
+                    const margin = data.settings.margin.left;
+
+                    doc.setFont("helvetica", "bold");
+                    doc.setFontSize(20);
+                    doc.setTextColor(185, 28, 28);
+                    doc.text("PICKUP MANIFEST", pageWidth / 2, 20, { align: 'center' });
+                    
+                    doc.setLineWidth(0.5);
+                    doc.line(margin, 24, pageWidth - margin, 24);
+
+                    doc.setFontSize(11);
+                    doc.setTextColor(50, 50, 50);
+                    doc.setFont("helvetica", "bold");
+                    doc.text("Shipper Company:", margin, 32);
+                    doc.setFont("helvetica", "normal");
+                    doc.text(SHIPPER_NAME, margin + 40, 32);
+                    doc.setFont("helvetica", "bold");
+                    doc.text("Courier Company:", pageWidth - margin - 80, 32);
+                    doc.setFont("helvetica", "normal");
+                    doc.text(COURIER_NAME, pageWidth - margin - 40, 32);
+                    doc.setFont("helvetica", "bold");
+                    doc.text("Date & Time:", margin, 40);
+                    doc.setFont("helvetica", "normal");
+                    doc.text(currentDateTime, margin + 30, 40);
+                    doc.setFont("helvetica", "bold");
+                    doc.text("Total Shipments:", pageWidth - margin - 80, 40);
+                    doc.setFont("helvetica", "normal");
+                    doc.text(total.toString(), pageWidth - margin - 40, 40);
+
+                    doc.setLineWidth(0.5);
+                    doc.line(margin, pageHeight - 25, pageWidth - margin, pageHeight - 25);
+                    doc.setFontSize(10);
+                    doc.setFont("helvetica", "bold");
+                    doc.text(`FE Name: ${feName}`, margin, pageHeight - 15);
+                    doc.text(`Total Shipments: ${total}`, pageWidth / 2, pageHeight - 15, { align: 'center' });
+                    doc.setFont("helvetica", "normal");
+                    doc.text("Page " + doc.internal.getNumberOfPages(), pageWidth - margin, pageHeight - 15, { align: 'right' });
+                }
+            });
+
+            doc.save(`DTDC_Manifest_${SHIPPER_NAME.replace(/\s+/g, '_')}_${new Date().toISOString().slice(0, 10)}.pdf`);
+            awbInput.focus();
+        });
+
+        // Generate CSV
+        btnCsv.addEventListener('click', () => {
+            if (scannedAWBs.length === 0) {
+                alert("No valid shipments scanned.");
+                awbInput.focus();
+                return;
+            }
+
+            let csvContent = "Sr. No.,AWB Code,Time Stamp\n";
+            [...scannedAWBs].reverse().forEach((scan, index) => {
+                csvContent += `${index + 1},"${scan.awb}","${scan.timestamp}"\n`;
+            });
+
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.setAttribute("href", url);
+            link.setAttribute("download", `DTDC_Manifest_${SHIPPER_NAME.replace(/\s+/g, '_')}_${new Date().toISOString().slice(0, 10)}.csv`);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            awbInput.focus();
+        });
+
+        // Focus management
+        document.body.addEventListener('click', (e) => {
+            const ignoreFocusIds = ['feName', 'btnPdf', 'btnCsv', 'btnCloseSheet', 'btnClear', 'btnDownloadHistory'];
+            if (!ignoreFocusIds.includes(e.target.id) && e.target.tagName !== 'BUTTON' && !e.target.closest('button')) {
+                awbInput.focus();
+            }
+        });
+
+    </script>
+</body>
+</html>
