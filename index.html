@@ -47,7 +47,7 @@
         <div class="container mx-auto px-4 py-3 flex flex-wrap justify-between items-center">
             <div class="flex items-center space-x-3">
                 <i class="fa-solid fa-boxes-packing text-2xl"></i>
-                <h1 class="text-xl md:text-2xl font-bold tracking-wide">Pickup Manifest Generator <span class="text-xs bg-red-900 text-red-200 px-2 py-1 rounded ml-2 align-middle">CLOUD SYNCED <i class="fa-solid fa-check ml-1"></i></span></h1>
+                <h1 class="text-xl md:text-2xl font-bold tracking-wide">Pickup Manifest Generator <span class="text-xs bg-red-900 text-red-200 px-2 py-1 rounded ml-2 align-middle" title="Real-time syncing across devices is active">LIVE SYNC <i class="fa-solid fa-satellite-dish ml-1"></i></span></h1>
             </div>
             <div class="text-right text-sm md:text-base mt-2 md:mt-0 bg-red-800 px-4 py-1 rounded-lg border border-red-600">
                 <div class="font-semibold text-red-100" id="liveClock">Loading time...</div>
@@ -203,7 +203,7 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, doc, setDoc, getDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // =========================================================================
         // GITHUB DEPLOYMENT INSTRUCTIONS:
@@ -284,52 +284,59 @@
         onAuthStateChanged(auth, async (user) => {
             if (user) {
                 currentUser = user;
-                currentDocRef = doc(db, 'artifacts', appId, 'users', user.uid, 'dtdc_data', 'current_manifest');
-                historyDocRef = doc(db, 'artifacts', appId, 'users', user.uid, 'dtdc_data', 'all_history');
                 
-                await loadCloudData();
+                // CRITICAL FIX: Changed paths from 'users/user.uid' to a shared 'public/data' folder.
+                // Now, ALL devices in the warehouse read and write to the exact same list!
+                currentDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'dtdc_manifests', 'current_manifest');
+                historyDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'dtdc_manifests', 'all_history');
                 
-                // Remove Loading Screen
-                loadingOverlay.classList.add('opacity-0');
-                setTimeout(() => {
-                    loadingOverlay.style.display = 'none';
-                    awbInput.disabled = false;
-                    awbInput.focus();
-                }, 500);
+                // Setup Real-Time Syncing using onSnapshot
+                onSnapshot(currentDocRef, (docSnap) => {
+                    if (docSnap.exists()) {
+                        const data = docSnap.data();
+                        scannedAWBs = data.scannedAWBs || [];
+                        errorLogs = data.errorLogs || [];
+                        // Only update FE Name if the user isn't currently typing in it
+                        if(data.feName && document.activeElement !== feNameInput) {
+                            feNameInput.value = data.feName;
+                        }
+                    } else {
+                        scannedAWBs = [];
+                        errorLogs = [];
+                    }
+                    
+                    updateUI();
+                    updateErrorUI();
+                    
+                    // Hide loading screen on the very first successful connection
+                    if (!window.hasLoadedInitially) {
+                        window.hasLoadedInitially = true;
+                        loadingOverlay.classList.add('opacity-0');
+                        setTimeout(() => {
+                            loadingOverlay.style.display = 'none';
+                            awbInput.disabled = false;
+                            awbInput.focus();
+                        }, 500);
+                    }
+                }, (error) => {
+                    console.error("Current Manifest Sync Error", error);
+                });
+
+                onSnapshot(historyDocRef, (docSnap) => {
+                    if (docSnap.exists()) {
+                        allTimeAWBs = docSnap.data().allTimeAWBs || [];
+                    } else {
+                        allTimeAWBs = [];
+                    }
+                }, (error) => {
+                    console.error("History Sync Error", error);
+                });
             }
         });
 
         initAuth();
 
-        // --- Cloud Sync Functions ---
-        async function loadCloudData() {
-            try {
-                const currentSnap = await getDoc(currentDocRef);
-                if (currentSnap.exists()) {
-                    const data = currentSnap.data();
-                    scannedAWBs = data.scannedAWBs || [];
-                    errorLogs = data.errorLogs || [];
-                    if(data.feName) feNameInput.value = data.feName;
-                } else {
-                    // If no document exists remotely, local state should be reset
-                    scannedAWBs = [];
-                    errorLogs = [];
-                }
-
-                const historySnap = await getDoc(historyDocRef);
-                if (historySnap.exists()) {
-                    allTimeAWBs = historySnap.data().allTimeAWBs || [];
-                } else {
-                    allTimeAWBs = [];
-                }
-                
-                updateUI();
-                updateErrorUI();
-            } catch (e) {
-                console.error("Failed to load cloud data", e);
-            }
-        }
-
+        // --- Cloud Save Functions ---
         async function saveCurrentStateToCloud() {
             if (!currentUser) return;
             try {
@@ -360,19 +367,30 @@
                 alert("Database not connected.");
                 return;
             }
-
-            // Show Loading UI
-            loadingOverlay.querySelector('h2').innerText = "Syncing from Cloud...";
+            
+            // Because onSnapshot handles data instantly, this button is mostly visual reassurance now
+            loadingOverlay.querySelector('h2').innerText = "Forcing Sync...";
             loadingOverlay.style.display = 'flex';
             loadingOverlay.classList.remove('opacity-0');
 
-            // Pull fresh data
-            await loadCloudData();
+            try {
+                const currentSnap = await getDoc(currentDocRef);
+                if (currentSnap.exists()) {
+                    const data = currentSnap.data();
+                    scannedAWBs = data.scannedAWBs || [];
+                    errorLogs = data.errorLogs || [];
+                    if(data.feName) feNameInput.value = data.feName;
+                }
+                
+                const historySnap = await getDoc(historyDocRef);
+                if (historySnap.exists()) allTimeAWBs = historySnap.data().allTimeAWBs || [];
+                
+                updateUI();
+                updateErrorUI();
+            } catch (e) { console.error(e); }
 
-            // Hide Loading UI
             loadingOverlay.classList.add('opacity-0');
             setTimeout(() => loadingOverlay.style.display = 'none', 500);
-            
             awbInput.focus();
         });
 
